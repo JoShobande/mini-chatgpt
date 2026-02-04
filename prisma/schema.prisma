@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  conversations Conversation[]
+  messages      Message[]
+}
+
+model Conversation {
+  id                String   @id @default(uuid())
+  userId            String
+  title             String?
+  createdAt         DateTime @default(now())
+
+  // denormalized fields for fast sidebar list
+  lastMessageAt     DateTime?
+  lastMessagePreview String  @default("")
+  messageCount      Int      @default(0)
+
+  // sequencing for ordered messages
+  nextSeq           Int      @default(1)
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages          Message[]
+
+  @@index([userId, lastMessageAt(sort: Desc), id(sort: Desc)])
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String
+  userId         String
+
+  role           MessageRole
+  content        String
+
+  // ordering guarantee within a conversation
+  seq            Int
+
+  createdAt      DateTime    @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, seq])
+  @@index([conversationId, seq])
+}
+
+
+
+
