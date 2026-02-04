@@ -31,6 +31,12 @@ function decodeCursor(raw: unknown): ConversationCursor | null {
   }
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 export const conversationsRouter = Router();
 
 conversationsRouter.post("/", async (req, res, next) => {
@@ -142,6 +148,101 @@ conversationsRouter.get("/", async (req, res, next) => {
         : null;
 
     res.json({ conversations: page, nextCursor });
+  } catch (err) {
+    next(err);
+  }
+});
+
+conversationsRouter.post("/:id/messages", async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: { code: "UNAUTHENTICATED", message: "Missing userId" },
+      });
+    }
+
+    const conversationId = req.params.id;
+
+    if (!isUuid(conversationId)) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    const convo = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId },
+      select: { id: true },
+    });
+    if (!convo) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    const content =
+      typeof req.body?.content === "string" ? req.body.content.trim() : "";
+
+    if (!content) {
+      return res.status(400).json({
+        error: { code: "INVALID_INPUT", message: "content is required" },
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Ownership check + read nextSeq
+      const convo = await tx.conversation.findFirst({
+        where: { id: conversationId, userId },
+        select: { id: true, nextSeq: true },
+      });
+
+      if (!convo) return { notFound: true as const };
+
+      const seq = convo.nextSeq;
+      const now = new Date();
+
+      // 2) Create message
+      const message = await tx.message.create({
+        data: {
+          conversationId: convo.id,
+          seq,
+          role: "user",
+          content,
+          createdAt: now,
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          seq: true,
+          role: true,
+          content: true,
+          createdAt: true,
+        },
+      });
+
+      // 3) Update conversation summary fields + nextSeq
+      await tx.conversation.update({
+        where: { id: convo.id },
+        data: {
+          nextSeq: { increment: 1 },
+          messageCount: { increment: 1 },
+          lastMessageAt: now,
+          lastMessagePreview: content.slice(0, 200),
+        },
+      });
+
+      return { notFound: false as const, message };
+    });
+
+    if (result.notFound) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    return res.status(201).json({ message: result.message });
+
+    res.status(200).json({ ok: true, conversationId, content });
   } catch (err) {
     next(err);
   }
