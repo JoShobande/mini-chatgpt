@@ -7,7 +7,7 @@ const app = express();
 
 app.use(express.json());
 app.use(mockAuth);
-app.use("/v1/conversations", conversationsRouter);
+// app.use("/v1/conversations", conversationsRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, userId: _req.userId });

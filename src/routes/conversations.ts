@@ -39,211 +39,211 @@ function isUuid(value: string) {
 
 export const conversationsRouter = Router();
 
-conversationsRouter.post("/", async (req, res, next) => {
-  try {
-    const userId = req.userId;
+// conversationsRouter.post("/", async (req, res, next) => {
+//   try {
+//     const userId = req.userId;
 
-    // MVP: create empty conversation
-    if (!userId) {
-      return res.status(401).json({
-        error: { code: "UNAUTHENTICATED", message: "Missing userId" },
-      });
-    }
-    const convo = await prisma.conversation.create({
-      data: {
-        userId,
-        // lastMessageAt etc can be null initially
-      },
-      select: {
-        id: true,
-        createdAt: true,
-        lastMessageAt: true,
-        lastMessagePreview: true,
-        messageCount: true,
-      },
-    });
+//     // MVP: create empty conversation
+//     if (!userId) {
+//       return res.status(401).json({
+//         error: { code: "UNAUTHENTICATED", message: "Missing userId" },
+//       });
+//     }
+//     const convo = await prisma.conversation.create({
+//       data: {
+//         userId,
+//         // lastMessageAt etc can be null initially
+//       },
+//       select: {
+//         id: true,
+//         createdAt: true,
+//         lastMessageAt: true,
+//         lastMessagePreview: true,
+//         messageCount: true,
+//       },
+//     });
 
-    res.status(201).json({ conversation: convo });
-  } catch (err) {
-    next(err);
-  }
-});
+//     res.status(201).json({ conversation: convo });
+//   } catch (err) {
+//     next(err);
+//   }
+// });
 
-conversationsRouter.get("/", async (req, res, next) => {
-  try {
-    const userId = req.userId;
+// conversationsRouter.get("/", async (req, res, next) => {
+//   try {
+//     const userId = req.userId;
 
-    if (!userId) {
-      return res.status(401).json({
-        error: { code: "UNAUTHENTICATED", message: "Missing userId" },
-      });
-    }
+//     if (!userId) {
+//       return res.status(401).json({
+//         error: { code: "UNAUTHENTICATED", message: "Missing userId" },
+//       });
+//     }
 
-    const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) ? Math.min(rawLimit, 50) : 20;
+//     const rawLimit = Number(req.query.limit);
+//     const limit = Number.isFinite(rawLimit) ? Math.min(rawLimit, 50) : 20;
 
-    const rawCursor = req.query.cursor;
-    const decoded = decodeCursor(rawCursor);
+//     const rawCursor = req.query.cursor;
+//     const decoded = decodeCursor(rawCursor);
 
-    // If the client provided cursor but it’s invalid => 400
-    if (rawCursor != null && decoded === null) {
-      return res.status(400).json({
-        error: { code: "INVALID_CURSOR", message: "Cursor is invalid" },
-      });
-    }
+//     // If the client provided cursor but it’s invalid => 400
+//     if (rawCursor != null && decoded === null) {
+//       return res.status(400).json({
+//         error: { code: "INVALID_CURSOR", message: "Cursor is invalid" },
+//       });
+//     }
 
-    const cursorWhere =
-      decoded && decoded.lastMessageAt
-        ? {
-            OR: [
-              { lastMessageAt: { lt: new Date(decoded.lastMessageAt) } },
-              {
-                AND: [
-                  { lastMessageAt: new Date(decoded.lastMessageAt) },
-                  { id: { lt: decoded.id } },
-                ],
-              },
-              { lastMessageAt: null },
-            ],
-          }
-        : null;
+//     const cursorWhere =
+//       decoded && decoded.lastMessageAt
+//         ? {
+//             OR: [
+//               { lastMessageAt: { lt: new Date(decoded.lastMessageAt) } },
+//               {
+//                 AND: [
+//                   { lastMessageAt: new Date(decoded.lastMessageAt) },
+//                   { id: { lt: decoded.id } },
+//                 ],
+//               },
+//               { lastMessageAt: null },
+//             ],
+//           }
+//         : null;
 
-    const cursorWhereNull =
-      decoded && decoded.lastMessageAt === null
-        ? {
-            AND: [{ lastMessageAt: null }, { id: { lt: decoded.id } }],
-          }
-        : null;
+//     const cursorWhereNull =
+//       decoded && decoded.lastMessageAt === null
+//         ? {
+//             AND: [{ lastMessageAt: null }, { id: { lt: decoded.id } }],
+//           }
+//         : null;
 
-    const conversations = await prisma.conversation.findMany({
-      where: {
-        userId,
-        ...(cursorWhere ? cursorWhere : {}),
-        ...(cursorWhereNull ? cursorWhereNull : {}),
-      },
-      orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      select: {
-        id: true,
-        title: true,
-        lastMessageAt: true,
-        lastMessagePreview: true,
-        messageCount: true,
-        createdAt: true,
-      },
-    });
+//     const conversations = await prisma.conversation.findMany({
+//       where: {
+//         userId,
+//         ...(cursorWhere ? cursorWhere : {}),
+//         ...(cursorWhereNull ? cursorWhereNull : {}),
+//       },
+//       orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+//       take: limit + 1,
+//       select: {
+//         id: true,
+//         title: true,
+//         lastMessageAt: true,
+//         lastMessagePreview: true,
+//         messageCount: true,
+//         createdAt: true,
+//       },
+//     });
 
-    const hasNext = conversations.length > limit;
-    const page = hasNext ? conversations.slice(0, limit) : conversations;
+//     const hasNext = conversations.length > limit;
+//     const page = hasNext ? conversations.slice(0, limit) : conversations;
 
-    const last = page[page.length - 1];
-    const nextCursor =
-      hasNext && last
-        ? encodeCursor({
-            lastMessageAt: last.lastMessageAt
-              ? last.lastMessageAt.toISOString()
-              : null,
-            id: last.id,
-          })
-        : null;
+//     const last = page[page.length - 1];
+//     const nextCursor =
+//       hasNext && last
+//         ? encodeCursor({
+//             lastMessageAt: last.lastMessageAt
+//               ? last.lastMessageAt.toISOString()
+//               : null,
+//             id: last.id,
+//           })
+//         : null;
 
-    res.json({ conversations: page, nextCursor });
-  } catch (err) {
-    next(err);
-  }
-});
+//     res.json({ conversations: page, nextCursor });
+//   } catch (err) {
+//     next(err);
+//   }
+// });
 
-conversationsRouter.post("/:id/messages", async (req, res, next) => {
-  try {
-    const userId = req.userId;
-    if (!userId) {
-      return res.status(401).json({
-        error: { code: "UNAUTHENTICATED", message: "Missing userId" },
-      });
-    }
+// conversationsRouter.post("/:id/messages", async (req, res, next) => {
+//   try {
+//     const userId = req.userId;
+//     if (!userId) {
+//       return res.status(401).json({
+//         error: { code: "UNAUTHENTICATED", message: "Missing userId" },
+//       });
+//     }
 
-    const conversationId = req.params.id;
+//     const conversationId = req.params.id;
 
-    if (!isUuid(conversationId)) {
-      return res.status(404).json({
-        error: { code: "NOT_FOUND", message: "Conversation not found" },
-      });
-    }
+//     if (!isUuid(conversationId)) {
+//       return res.status(404).json({
+//         error: { code: "NOT_FOUND", message: "Conversation not found" },
+//       });
+//     }
 
-    const convo = await prisma.conversation.findFirst({
-      where: { id: conversationId, userId },
-      select: { id: true },
-    });
-    if (!convo) {
-      return res.status(404).json({
-        error: { code: "NOT_FOUND", message: "Conversation not found" },
-      });
-    }
+//     const convo = await prisma.conversation.findFirst({
+//       where: { id: conversationId, userId },
+//       select: { id: true },
+//     });
+//     if (!convo) {
+//       return res.status(404).json({
+//         error: { code: "NOT_FOUND", message: "Conversation not found" },
+//       });
+//     }
 
-    const content =
-      typeof req.body?.content === "string" ? req.body.content.trim() : "";
+//     const content =
+//       typeof req.body?.content === "string" ? req.body.content.trim() : "";
 
-    if (!content) {
-      return res.status(400).json({
-        error: { code: "INVALID_INPUT", message: "content is required" },
-      });
-    }
+//     if (!content) {
+//       return res.status(400).json({
+//         error: { code: "INVALID_INPUT", message: "content is required" },
+//       });
+//     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // 1) Ownership check + read nextSeq
-      const convo = await tx.conversation.findFirst({
-        where: { id: conversationId, userId },
-        select: { id: true, nextSeq: true },
-      });
+//     const result = await prisma.$transaction(async (tx) => {
+//       // 1) Ownership check + read nextSeq
+//       const convo = await tx.conversation.findFirst({
+//         where: { id: conversationId, userId },
+//         select: { id: true, nextSeq: true },
+//       });
 
-      if (!convo) return { notFound: true as const };
+//       if (!convo) return { notFound: true as const };
 
-      const seq = convo.nextSeq;
-      const now = new Date();
+//       const seq = convo.nextSeq;
+//       const now = new Date();
 
-      // 2) Create message
-      const message = await tx.message.create({
-        data: {
-          conversationId: convo.id,
-          seq,
-          role: "user",
-          content,
-          createdAt: now,
-        },
-        select: {
-          id: true,
-          conversationId: true,
-          seq: true,
-          role: true,
-          content: true,
-          createdAt: true,
-        },
-      });
+//       // 2) Create message
+//       const message = await tx.message.create({
+//         data: {
+//           conversationId: convo.id,
+//           seq,
+//           role: "USER",
+//           content,
+//           createdAt: now,
+//         },
+//         select: {
+//           id: true,
+//           conversationId: true,
+//           seq: true,
+//           role: true,
+//           content: true,
+//           createdAt: true,
+//         },
+//       });
 
-      // 3) Update conversation summary fields + nextSeq
-      await tx.conversation.update({
-        where: { id: convo.id },
-        data: {
-          nextSeq: { increment: 1 },
-          messageCount: { increment: 1 },
-          lastMessageAt: now,
-          lastMessagePreview: content.slice(0, 200),
-        },
-      });
+//       // 3) Update conversation summary fields + nextSeq
+//       await tx.conversation.update({
+//         where: { id: convo.id },
+//         data: {
+//           nextSeq: { increment: 1 },
+//           messageCount: { increment: 1 },
+//           lastMessageAt: now,
+//           lastMessagePreview: content.slice(0, 200),
+//         },
+//       });
 
-      return { notFound: false as const, message };
-    });
+//       return { notFound: false as const, message };
+//     });
 
-    if (result.notFound) {
-      return res.status(404).json({
-        error: { code: "NOT_FOUND", message: "Conversation not found" },
-      });
-    }
+//     if (result.notFound) {
+//       return res.status(404).json({
+//         error: { code: "NOT_FOUND", message: "Conversation not found" },
+//       });
+//     }
 
-    return res.status(201).json({ message: result.message });
+//     return res.status(201).json({ message: result.message });
 
-    res.status(200).json({ ok: true, conversationId, content });
-  } catch (err) {
-    next(err);
-  }
-});
+//     // res.status(200).json({ ok: true, conversationId, content });
+//   } catch (err) {
+//     next(err);
+//   }
+// });
