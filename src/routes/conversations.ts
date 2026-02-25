@@ -39,6 +39,62 @@ function isUuid(value: string) {
 
 export const conversationsRouter = Router();
 
+/**
+ * GET /v1/conversations
+ * Returns sidebar summaries only, ordered by last activity.
+ */
+
+conversationsRouter.get("/", async (req, res, next) => {
+  const userId = req.userId; // comes from mockAuth
+
+  const take = 20;
+
+  const cursorLastMessageAt = req.query.cursorLastMessageAt
+    ? new Date(String(req.query.cursorLastMessageAt))
+    : null;
+
+  const cursorId = req.query.cursorId ? String(req.query.cursorId) : null;
+
+  const where: any = { userId };
+
+  if (cursorLastMessageAt && cursorId) {
+    where.OR = [
+      { lastMessageAt: { lt: cursorLastMessageAt } },
+      { lastMessageAt: cursorLastMessageAt, id: { lt: cursorId } },
+    ];
+  }
+
+  try {
+    const conversations = await prisma.conversation.findMany({
+      where,
+      orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+      take,
+      select: {
+        id: true,
+        title: true,
+        lastMessageAt: true,
+        lastMessagePreview: true,
+        messageCount: true,
+        createdAt: true,
+      },
+    });
+
+    const last = conversations[conversations.length - 1];
+
+    const nextCursor =
+      conversations.length === take && last
+        ? {
+            cursorLastMessageAt: last.lastMessageAt.toISOString(),
+            cursorId: last.id,
+          }
+        : null;
+
+    res.json({ conversations, nextCursor });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // conversationsRouter.post("/", async (req, res, next) => {
 //   try {
 //     const userId = req.userId;
