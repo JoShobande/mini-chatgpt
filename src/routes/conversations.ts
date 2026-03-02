@@ -1,41 +1,41 @@
 import { Router } from "express";
 import { prisma } from "../db";
 
-type ConversationCursor = { lastMessageAt: string | null; id: string };
+// type ConversationCursor = { lastMessageAt: string | null; id: string };
 
-function encodeCursor(cursor: ConversationCursor) {
-  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
-}
+// function encodeCursor(cursor: ConversationCursor) {
+//   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+// }
 
-function decodeCursor(raw: unknown): ConversationCursor | null {
-  if (raw == null) return null; // cursor not provided
+// function decodeCursor(raw: unknown): ConversationCursor | null {
+//   if (raw == null) return null; // cursor not provided
 
-  if (typeof raw !== "string") return null;
+//   if (typeof raw !== "string") return null;
 
-  try {
-    const json = Buffer.from(raw, "base64url").toString("utf8");
-    const parsed = JSON.parse(json);
+//   try {
+//     const json = Buffer.from(raw, "base64url").toString("utf8");
+//     const parsed = JSON.parse(json);
 
-    // validate shape
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof (parsed as any).id !== "string") return null;
+//     // validate shape
+//     if (!parsed || typeof parsed !== "object") return null;
+//     if (typeof (parsed as any).id !== "string") return null;
 
-    const lastMessageAt = (parsed as any).lastMessageAt;
-    const okLast = lastMessageAt === null || typeof lastMessageAt === "string";
+//     const lastMessageAt = (parsed as any).lastMessageAt;
+//     const okLast = lastMessageAt === null || typeof lastMessageAt === "string";
 
-    if (!okLast) return null;
+//     if (!okLast) return null;
 
-    return { id: (parsed as any).id, lastMessageAt };
-  } catch {
-    return null;
-  }
-}
+//     return { id: (parsed as any).id, lastMessageAt };
+//   } catch {
+//     return null;
+//   }
+// }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
-}
+// function isUuid(value: string) {
+//   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+//     value,
+//   );
+// }
 
 export const conversationsRouter = Router();
 
@@ -90,6 +90,62 @@ conversationsRouter.get("/", async (req, res, next) => {
         : null;
 
     res.json({ conversations, nextCursor });
+  } catch (err) {
+    next(err);
+  }
+});
+
+conversationsRouter.get("/:id/messages", async (req, res, next) => {
+  const userId = req.userId; // comes from mockAuth
+
+  const conversationId = req.params.id;
+
+  try {
+    const theConversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId },
+    });
+
+    if (!theConversation) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+  } catch (err) {
+    next(err);
+  }
+
+  const take = 20;
+  const where: any = { conversationId };
+
+  const cursorSeqRaw = req.query.cursorSeq;
+  const cursorSeq =
+    typeof cursorSeqRaw === "string" ? Number(cursorSeqRaw) : null;
+
+  if (cursorSeq !== null && !Number.isNaN(cursorSeq)) {
+    where.seq = { gt: cursorSeq }; // forward pagination
+  }
+
+  try {
+    const messages = await prisma.message.findMany({
+      where,
+      orderBy: [{ seq: "asc" }],
+      take,
+      select: {
+        id: true,
+        seq: true,
+        role: true,
+        createdAt: true,
+        content: true,
+      },
+    });
+
+    const lastMessage = messages[messages.length - 1];
+    const nextCursor =
+      messages.length === take && lastMessage
+        ? { cursorSeq: lastMessage.seq }
+        : null;
+
+    res.json({ messages, nextCursor });
   } catch (err) {
     next(err);
   }
