@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db";
+import { ok } from "node:assert";
 
 // type ConversationCursor = { lastMessageAt: string | null; id: string };
 
@@ -146,6 +147,147 @@ conversationsRouter.get("/:id/messages", async (req, res, next) => {
         : null;
 
     res.json({ messages, nextCursor });
+  } catch (err) {
+    next(err);
+  }
+});
+
+conversationsRouter.post("/", async (req, res, next) => {
+  try {
+    const content = (req.body?.content ?? "").trim();
+    if (!content) {
+      return res.status(400).json({
+        error: { code: "BAD_REQUEST", message: "content is required" },
+      });
+    }
+
+    const title = (req.body?.title ?? "").trim() || null;
+    const now = new Date();
+    const preview = content.slice(0, 120);
+    const userId = req.userId;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.create({
+        data: {
+          userId,
+          title,
+          lastMessageAt: now,
+          lastMessagePreview: preview,
+          messageCount: 1,
+          nextSeq: 2,
+        },
+        select: {
+          id: true,
+          title: true,
+          lastMessageAt: true,
+          lastMessagePreview: true,
+          messageCount: true,
+          nextSeq: true,
+          createdAt: true,
+        },
+      });
+
+      const message = await tx.message.create({
+        data: {
+          conversationId: conversation.id,
+          role: "USER",
+          content,
+          seq: 1,
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          role: true,
+          content: true,
+          seq: true,
+          createdAt: true,
+        },
+      });
+
+      return { conversation, message };
+    });
+
+    return res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+conversationsRouter.post("/:id/messages", async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const conversationId = req.params.id;
+
+    const content = (req.body?.content ?? "").trim();
+    if (!content) {
+      return res.status(400).json({
+        error: { code: "BAD_REQUEST", message: "content is required" },
+      });
+    }
+
+    const now = new Date();
+    const preview = content.slice(0, 120);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Ownership check + read nextSeq INSIDE the transaction
+      const convo = await tx.conversation.findFirst({
+        where: { id: conversationId, userId },
+        select: { id: true, nextSeq: true },
+      });
+
+      if (!convo) {
+        return { notFound: true as const };
+      }
+
+      const message = await tx.message.create({
+        data: {
+          conversationId,
+          role: "USER", // <-- change to "USER" if your enum is uppercase
+          content,
+          seq: convo.nextSeq,
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          role: true,
+          content: true,
+          seq: true,
+          createdAt: true,
+        },
+      });
+
+      const conversation = await tx.conversation.update({
+        where: { id: conversationId },
+        data: {
+          lastMessageAt: now,
+          lastMessagePreview: preview,
+          messageCount: { increment: 1 },
+          nextSeq: { increment: 1 },
+        },
+        select: {
+          id: true,
+          title: true,
+          lastMessageAt: true,
+          lastMessagePreview: true,
+          messageCount: true,
+          nextSeq: true,
+          createdAt: true,
+        },
+      });
+
+      return { notFound: false as const, conversation, message };
+    });
+
+    if (result.notFound) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    return res.status(201).json({
+      conversation: result.conversation,
+      message: result.message,
+    });
   } catch (err) {
     next(err);
   }
