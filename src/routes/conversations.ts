@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../db";
-import { ok } from "node:assert";
+import { MessageRole, MessageStatus } from "@prisma/client";
+import {
+  createAssistantPlaceholder,
+  createMessage,
+  findOwnedConversationWithNextSeq,
+  updateConversationMetadata,
+} from "../helpers/routeHelper";
 
 export const conversationsRouter = Router();
 
@@ -10,57 +16,6 @@ function getPreview(content: string) {
 
 function getCurrentDate() {
   return new Date();
-}
-
-async function updateConversationMetadata(
-  tx: any,
-  conversationId: string,
-  now: Date,
-  preview: string,
-) {
-  return tx.conversation.update({
-    where: { id: conversationId },
-    data: {
-      lastMessageAt: now,
-      lastMessagePreview: preview,
-      messageCount: { increment: 1 },
-      nextSeq: { increment: 1 },
-    },
-    select: {
-      id: true,
-      title: true,
-      lastMessageAt: true,
-      lastMessagePreview: true,
-      messageCount: true,
-      nextSeq: true,
-      createdAt: true,
-    },
-  });
-}
-
-async function createMessage(
-  tx: any,
-  conversationId: string,
-  seq: number,
-  role: string,
-  content: string,
-) {
-  return tx.message.create({
-    data: {
-      conversationId,
-      role,
-      content,
-      seq,
-    },
-    select: {
-      id: true,
-      conversationId: true,
-      role: true,
-      content: true,
-      seq: true,
-      createdAt: true,
-    },
-  });
 }
 
 /**
@@ -210,23 +165,7 @@ conversationsRouter.post("/", async (req, res, next) => {
         },
       });
 
-      const message = await tx.message.create({
-        data: {
-          conversationId: conversation.id,
-          role: "USER",
-          content,
-          seq: 1,
-        },
-        select: {
-          id: true,
-          conversationId: true,
-          role: true,
-          content: true,
-          seq: true,
-          createdAt: true,
-        },
-      });
-
+      const message = createMessage(tx, conversation.id, 1, "USER", content);
       return { conversation, message };
     });
 
@@ -253,10 +192,11 @@ conversationsRouter.post("/:id/messages", async (req, res, next) => {
 
     const result = await prisma.$transaction(async (tx) => {
       // Ownership check + read nextSeq INSIDE the transaction
-      const convo = await tx.conversation.findFirst({
-        where: { id: conversationId, userId },
-        select: { id: true, nextSeq: true },
-      });
+      const convo = await findOwnedConversationWithNextSeq(
+        tx,
+        conversationId,
+        userId,
+      );
 
       if (!convo) {
         return { notFound: true as const };
@@ -274,7 +214,7 @@ conversationsRouter.post("/:id/messages", async (req, res, next) => {
         tx,
         conversationId,
         now,
-        preview,
+        { preview },
       );
 
       return { notFound: false as const, conversation, message };
@@ -286,9 +226,56 @@ conversationsRouter.post("/:id/messages", async (req, res, next) => {
       });
     }
 
+    const assistantResult = await prisma.$transaction(async (tx) => {
+      const convo = await findOwnedConversationWithNextSeq(
+        tx,
+        conversationId,
+        userId,
+      );
+
+      if (!convo) {
+        return { notFound: true as const };
+      }
+
+      const assistantMessage = await createAssistantPlaceholder(
+        tx,
+        conversationId,
+        convo.nextSeq,
+      );
+
+      const conversation = await updateConversationMetadata(
+        tx,
+        conversationId,
+        now,
+      );
+
+      return {
+        notFound: false as const,
+        conversation,
+        assistantMessage,
+      };
+    });
+
+    if (assistantResult.notFound) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    setTimeout(async () => {
+      await prisma.message.update({
+        where: { id: assistantResult.assistantMessage.id },
+        data: {
+          content: "This is a simulated assistant reply.",
+          status: MessageStatus.COMPLETE,
+        },
+      });
+    }, 1500);
+
     return res.status(201).json({
       conversation: result.conversation,
       message: result.message,
+      assistantMessage: assistantResult.assistantMessage,
     });
   } catch (err) {
     next(err);

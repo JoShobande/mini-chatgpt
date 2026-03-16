@@ -18,6 +18,11 @@ enum MessageRole {
   SYSTEM
 }
 
+enum MessageStatus {
+  GENERATING
+  COMPLETE
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -52,6 +57,7 @@ model Message {
 
 
   role           MessageRole
+  status  MessageStatus @default(COMPLETE)
   content        String
 
   // ordering guarantee within a conversation
