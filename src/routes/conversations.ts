@@ -74,6 +74,53 @@ conversationsRouter.get("/", async (req, res, next) => {
   }
 });
 
+conversationsRouter.get("/:id/stream", async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const conversationId = req.params.id;
+
+    const theConversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId },
+    });
+
+    if (!theConversation) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Conversation not found" },
+      });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const chunks = ["This ", "is ", "a ", "streamed ", "reply."];
+    let index = 0;
+
+    const intervalId = setInterval(() => {
+      if (index < chunks.length) {
+        res.write(`data: ${chunks[index]}\n\n`);
+        index += 1;
+        return;
+      }
+
+      clearInterval(intervalId);
+      res.write(`event: done\n`);
+      res.write(`data: complete\n\n`);
+      res.end();
+    }, 500);
+
+    req.on("close", () => {
+      console.log("SSE client disconnected");
+      clearInterval(intervalId);
+    });
+
+    res.write(`data: connected\n\n`);
+  } catch (err) {
+    next(err);
+  }
+});
+
 conversationsRouter.get("/:id/messages", async (req, res, next) => {
   const userId = req.userId; // comes from mockAuth
 
