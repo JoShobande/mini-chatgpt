@@ -313,7 +313,7 @@ conversationsRouter.post("/:id/messages", async (req, res, next) => {
       await prisma.message.update({
         where: { id: assistantResult.assistantMessage.id },
         data: {
-          content: "This is a simulated assistant reply.",
+          content: "This is a streamed reply.",
           status: MessageStatus.COMPLETE,
         },
       });
